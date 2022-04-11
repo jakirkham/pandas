@@ -1,4 +1,5 @@
 """ pickle compat """
+from functools import partial, wraps
 import pickle
 from typing import Any
 import warnings
@@ -87,6 +88,14 @@ def to_pickle(
     if protocol < 0:
         protocol = pickle.HIGHEST_PROTOCOL
 
+    def write_wrapper(write):
+        @wraps(write)
+        def _write(b):
+            if protocol >= 5 and isinstance(b, pickle.PickleBuffer):
+                b = b.raw()
+            return write(b)
+        return _write
+
     with get_handle(
         filepath_or_buffer,
         "wb",
@@ -94,7 +103,12 @@ def to_pickle(
         is_text=False,
         storage_options=storage_options,
     ) as handles:
-        pickle.dump(obj, handles.handle, protocol=protocol)  # type: ignore[arg-type]
+        hdl = handles.handle
+        try:
+            hdl.write = write_wrapper(hdl.write)
+            pickle.dump(obj, hdl, protocol=protocol)  # type: ignore[arg-type]
+        finally:
+            hdl.write = hdl.write.__wrapped__
 
 
 @doc(storage_options=generic._shared_docs["storage_options"])
